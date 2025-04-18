@@ -1,0 +1,387 @@
+---
+title: "PolyQ x FIC-1 RNAseq Final Analysis"
+author: "Kate Van Pelt"
+date: "2023-07-25"
+output: html_document
+---
+## Description
+
+Analysis of bulk RNA-sequencing data obtained from wild-type (N2), fic-1 KO (n5823), polyQ (AM141), and polyQ x fic-1 KO (MT24058) animals at the L4 stage, grown on either pos-1, hsp-3, or hsp-4 RNAi. Goal is to identify differentially expressed genes that might explain rescue of polyQ lethality upon hsp-3/4 knock-down by loss of fic-1. Analyzing data from 3 independent replicates (R1, R2, R3) with edgeR. 
+
+```{r}
+
+# Install edgeR package for differential expression analysis and other packages needed for analysis
+
+library(edgeR)
+library(statmod)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Read in the files containing raw read counts obtained from the genomics core along with the raw data 
+data1 <- read.delim("8154_gene_expected_count.annot.txt", row.names = NULL)
+data2 <- read.delim("8703_gene_expected_count.annot.txt", row.names = NULL)
+data3 <- read.delim("8791_gene_expected_count.annot.txt", row.names = NULL)
+
+# Following instructions from the genomics core to pre-process the data before DE analysis
+# Deal with genes that don't have annotated gene symbols (external_gene_name)
+# Use ENSEMBL ID if gene symbol not available
+# Repeat for all thee datasets
+
+data1$external_gene_name <- ifelse(
+  data1$external_gene_name == ".",
+  data1$gene_id,
+  data1$external_gene_name
+)
+
+data2$external_gene_name <- ifelse(
+  data2$external_gene_name == ".",
+  data2$gene_id,
+  data2$external_gene_name
+)
+
+data3$external_gene_name <- ifelse(
+  data3$external_gene_name == ".",
+  data3$gene_id,
+  data3$external_gene_name
+)
+
+
+# Deal with duplicated gene symbols
+# Combine gene symbol with ENSEMBL ID if non-unique
+
+data1$external_gene_name <- ifelse(
+  duplicated(data1$external_gene_name),
+  paste(data1$external_gene_name, data1$gene_id, sep="_"),
+  data1$external_gene_name
+)
+
+data2$external_gene_name <- ifelse(
+  duplicated(data2$external_gene_name),
+  paste(data2$external_gene_name, data2$gene_id, sep="_"),
+  data2$external_gene_name
+)
+
+data3$external_gene_name <- ifelse(
+  duplicated(data3$external_gene_name),
+  paste(data3$external_gene_name, data3$gene_id, sep="_"),
+  data3$external_gene_name
+)
+
+# Then we can use the gene symbol column as the row names and subset the count data for further analysis
+
+rownames(data1) <- data1$external_gene_name
+samples1 <- data1[,5:ncol(data1)]
+
+# Then we can use the gene symbol column as the row names and subset the count data for further analysis
+
+rownames(data1) <- data1$external_gene_name
+samples1 <- data1[,5:ncol(data1)]
+
+rownames(data2) <- data2$external_gene_name
+samples2 <- data2[,5:ncol(data2)]
+
+rownames(data3) <- data3$external_gene_name
+samples3 <- data3[,5:ncol(data3)]
+
+# Rename columns with sample descriptions
+
+colnames(samples1)[1] = "N2_POS1_R1"
+colnames(samples1)[2] = "MT24058_HSP4_R1"
+colnames(samples1)[3] = "N2_HSP3_R1"
+colnames(samples1)[4] = "N2_HSP4_R1"
+colnames(samples1)[5] = "5823_POS1_R1"
+colnames(samples1)[6] = "5823_HSP3_R1"
+colnames(samples1)[7] = "5823_HSP4_R1"
+colnames(samples1)[8] = "AM141_POS1_R1"
+colnames(samples1)[9] = "MT24058_POS1_R1"
+colnames(samples1)[10] = "MT24058_HSP3_R1"
+
+colnames(samples2)[1] = "N2_POS1_R2"
+colnames(samples2)[2] = "MT24058_HSP4_R2"
+colnames(samples2)[3] = "N2_HSP3_R2"
+colnames(samples2)[4] = "N2_HSP4_R2"
+colnames(samples2)[5] = "5823_POS1_R2"
+colnames(samples2)[6] = "5823_HSP3_R2"
+colnames(samples2)[7] = "5823_HSP4_R2"
+colnames(samples2)[8] = "AM141_POS1_R2"
+colnames(samples2)[9] = "MT24058_POS1_R2"
+colnames(samples2)[10] = "MT24058_HSP3_R2"
+
+colnames(samples3)[1] = "N2_POS1_R3"
+colnames(samples3)[2] = "MT24058_HSP4_R3"
+colnames(samples3)[3] = "N2_HSP3_R3"
+colnames(samples3)[4] = "N2_HSP4_R3"
+colnames(samples3)[5] = "5823_POS1_R3"
+colnames(samples3)[6] = "5823_HSP3_R3"
+colnames(samples3)[7] = "5823_HSP4_R3"
+colnames(samples3)[8] = "AM141_POS1_R3"
+colnames(samples3)[9] = "MT24058_POS1_R3"
+colnames(samples3)[10] = "MT24058_HSP3_R3"
+
+# Save cleaned and re-labeled datasets as csv file - use write.csv to prevent row.names from shifting columns left in output file
+
+write.csv(samples1, file="8154_final_gene_counts.csv")
+write.csv(samples2, file="8703_final_gene_counts.csv")
+write.csv(samples3, file="8791_final_gene_counts.csv")
+
+# Use cbind to combine all replicates into one large counts table
+
+combined_data <- cbind(samples1, samples2, samples3)
+
+# Save pooled counts table 
+
+write.csv(combined_data, file="8154_8703_8791_pooled_counts.csv")
+
+# Save count files with intact gene ID information (ENSEMBL ID)
+
+# Change column names to sample/replicate ID for all 3 count tables
+colnames(data1)[5] = "N2_POS1_R1"
+colnames(data1)[6] = "MT24058_HSP4_R1"
+colnames(data1)[7] = "N2_HSP3_R1"
+colnames(data1)[8] = "N2_HSP4_R1"
+colnames(data1)[9] = "5823_POS1_R1"
+colnames(data1)[10] = "5823_HSP3_R1"
+colnames(data1)[11] = "5823_HSP4_R1"
+colnames(data1)[12] = "AM141_POS1_R1"
+colnames(data1)[13] = "MT24058_POS1_R1"
+colnames(data1)[14] = "MT24058_HSP3_R1"
+
+write.csv(data1, file = "8154_Rep1_counts_with_gene_info.csv")
+
+colnames(data2)[5] = "N2_POS1_R2"
+colnames(data2)[6] = "MT24058_HSP4_R2"
+colnames(data2)[7] = "N2_HSP3_R2"
+colnames(data2)[8] = "N2_HSP4_R2"
+colnames(data2)[9] = "5823_POS1_R2"
+colnames(data2)[10] = "5823_HSP3_R2"
+colnames(data2)[11] = "5823_HSP4_R2"
+colnames(data2)[12] = "AM141_POS1_R2"
+colnames(data2)[13] = "MT24058_POS1_R2"
+colnames(data2)[14] = "MT24058_HSP3_R2"
+
+write.csv(data2, file = "8703_Rep2_counts_with_gene_info.csv")
+
+colnames(data3)[5] = "N2_POS1_R3"
+colnames(data3)[6] = "MT24058_HSP4_R3"
+colnames(data3)[7] = "N2_HSP3_R3"
+colnames(data3)[8] = "N2_HSP4_R3"
+colnames(data3)[9] = "5823_POS1_R3"
+colnames(data3)[10] = "5823_HSP3_R3"
+colnames(data3)[11] = "5823_HSP4_R3"
+colnames(data3)[12] = "AM141_POS1_R3"
+colnames(data3)[13] = "MT24058_POS1_R3"
+colnames(data3)[14] = "MT24058_HSP3_R3"
+
+write.csv(data3, file = "8791_Rep3_counts_with_gene_info.csv")
+
+```
+Now, we construct a .csv file detailing the experimental design (samples, genotypes, and RNAi treatments). Using this and the cleaned datasets above, we can construct a DGE list object for analysis with edgeR.
+
+```{r}
+
+# Read in table containing the experimental design
+
+expdesign <- read.csv(file = "expdesign.csv")
+
+```
+
+The grouping factors need to be added as a column to our experimental design before we can create a DGE list object. Here we use paste and factor to combine the factors (condition and genotype) into one string (group) separated by a period for each sample. These strings are stored as a vector in the group data frame.
+
+```{r}
+
+# Set up the grouping factors
+group <- factor(paste(expdesign$genotype,expdesign$treatment,sep="."))
+cbind(expdesign,group=group)
+
+```
+
+Now, use the gene counts table and grouping factors to form a DGElist object
+
+```{r}
+
+DGElist <- DGEList(counts=combined_data,group=group)
+
+```
+
+
+Begin by plotting the library sizes of our sequencing reads (per sample) prior to normalization using the barplot function
+
+```{r}
+
+libsize <- barplot(DGElist$samples$lib.size*1e-6, names=1:ncol(DGElist), ylab="Library size (millions)")
+
+```
+
+
+Next step = filter raw gene counts by expression levels and remove lowly expressed genes. We will do this using the filterbyExpr function in edgeR, which keeps genes that have count-per-million (CPM) above k in n samples, where k is determined by min.count and by the sample library sizes and n is determined by the design matrix.
+
+```{r}
+
+#Retain genes only if it is expressed at a minimum level
+
+keep <- filterByExpr(DGElist, group=group)
+DGElist <- DGElist[keep, , keep.lib.sizes=FALSE]
+
+#View a summary of the normalized counts
+summary(keep)
+
+```
+
+The filtered raw counts are then normalized with calcNormFactors according to the weighted trimmed mean of M-values (TMM) to eliminate composition biases between libraries. The normalized gene counts in counts per million (CPM) are output to the normalized counts csv file using the write.table function.
+
+```{r}
+
+#Use TMM normalization to eliminate composition biases
+DGElist <- calcNormFactors(DGElist)
+
+normfact <- calcNormFactors(DGElist)
+norm <- as.data.frame(normfact)
+
+plotMDS(normfact)
+
+#Write normalized counts to file
+normList <- cpm(DGElist, normalized.lib.sizes=TRUE)
+
+write.csv(normList, file="normalized_counts_final.csv")
+
+```
+First, we can verify the TMM normalization with a mean difference (MD) plot of all log fold change (logFC) against average count size. The resulting plot is saved to the normalized MD jpg file.
+
+In the code below, 'column' dictates the sample we're looking at. We'll look at the first sample from biological replicate #1 (N2_POS1_R1) to start. 
+
+```{r}
+
+#Verify TMM normalization using a MD plot
+
+plot <- plotMD(cpm(DGElist, log=TRUE), column=30)
+abline(h=0, col="red", lty=2, lwd=2)
+
+```
+
+Next, we want to visualize how different our samples are from each other using a multidimensional scaling plot, or MDS. This can be done using the plotMDS function. This function plots samples on a two-dimensional scatter plot so that distances on the plot approximate the typical log2 fold changes between the samples.
+
+```{r}
+
+# Use a MDS plot to visualizes the differences between samples
+
+plot <- 
+  plotMDS(DGElist)
+df <- as.data.frame(plot)
+points <- rep(c(2,0,0,0,1,1,1,5,5,5), 3) 
+colors <- rep(c("steelblue1", "salmon", "lightseagreen", "steelblue1", "salmon", "lightseagreen", "steelblue1", "salmon", "lightseagreen", "steelblue1"), 2)
+plotMDS(DGElist, col=colors[group], pch=points[group], cex=1.5, lwd=2)
+par(mar=c(5, 4, 1, 15) + 0.1, xpd=TRUE)
+legend("top", inset=c(0, 0), pch=c(1, 5, 2, 0), legend = c("wild-type", "fic-1 KO", "Q40::YFP", "Q40::YFP + fic-1 KO"))
+legend("bottom", inset = c(0, 0), col = c("steelblue1","salmon", "lightseagreen"), legend = c("pos-1", "hsp-3", "hsp-4"), lwd=2, lty=c(1))
+
+```
+
+The design matrix for our data also needs to be specified before we can perform the F-tests. The experimental design is parametrized with a one-way layout and one coefficient is assigned to each group.
+
+
+```{r}
+
+# Specify the design matrix 
+
+design <- model.matrix(~ 0 + group)
+colnames(design) <- levels(group)
+
+# View the design matrix
+design
+
+
+```
+With the normalized gene counts and design matrix we can now generate the negative binomial (NB) dispersion estimates using the estimateDisp function. The NB dispersion estimates reflect the overall biological variability under the QL framework in edgeR.
+
+```{r}
+
+#Generate the negative binomial dispersion estimates
+list <- estimateDisp(DGElist, design, robust=TRUE)
+
+#View the common dispersion
+list$common.dispersion
+
+#Visualize the dispersion estimates with a BCV plot
+jpeg("glmQLF_plotBCV.jpg")
+plotBCV(list)
+
+```
+Next, we estimate the QL dispersions for all genes using the glmQLFit function. This detects the gene-specific variability above and below the overall level. The dispersion are then plotted with plotQLDisp, and the resulting plot is saved to the glmQLF_plotQLDisp jpg file.
+
+```{r}
+
+#Estimate and view the QL dispersions
+fit <- glmQLFit(list, design, robust=TRUE)
+head(fit$coefficients)
+
+#Plot to the QL dispersions and write to file
+jpeg("glmQLF_plotQLDisp.jpg")
+plotQLDisp(fit)
+
+```
+
+Make contrasts between individual groups to identify top differentially expressed genes.
+
+``` {r}
+library(dplyr)
+library(ggplot2)
+library(statmod)
+library(tidyr)
+
+# Compare N2 vs. n5823 on POS-1 (control) RNAi 
+a <- makeContrasts(N2.POS1-n5823.POS1, levels=design)
+test1 <- glmQLFTest(fit, contrast=a)
+go <- goana(test1, species="Ce")
+
+write.csv(test1, file="N2_v_n5823_POS1.csv")
+
+# Compare N2 vs. n5823 on HSP-3 RNAi 
+b <- makeContrasts(N2.HSP3-n5823.HSP3, levels=design)
+test2 <- glmQLFTest(fit, contrast=b)
+write.csv(test2, file="N2_v_n5823_HSP3.csv")
+
+# Compare N2 vs. n5823 on HSP-4 RNAi 
+c <- makeContrasts(N2.HSP4-n5823.HSP4, levels=design)
+test3 <- glmQLFTest(fit, contrast=c)
+write.csv(test3, file="N2_v_n5823_HSP4.csv")
+
+# Compare N2 on HSP-3 vs. control RNAi
+d <- makeContrasts(N2.HSP3-N2.POS1, levels=design)
+test4 <- glmQLFTest(fit, contrast=d)
+write.csv(test4, file="N2_HSP3_v_POS1.csv")
+
+# Compare N2 on HSP-4 vs. control RNAi
+e <- makeContrasts(N2.HSP4-N2.POS1, levels=design)
+test5 <- glmQLFTest(fit, contrast=e)
+write.csv(test5, file="N2_HSP4_v_POS1.csv")
+
+# Compare n5823 on HSP-3 vs. control RNAi
+f <- makeContrasts(n5823.HSP3-n5823.POS1, levels=design)
+test6 <- glmQLFTest(fit, contrast=f)
+write.csv(test6, file="n5823_HSP3_v_POS1.csv")
+
+# Compare n5823 on HSP-4 vs. control RNAi
+g <- makeContrasts(n5823.HSP4-n5823.POS1, levels=design)
+test7 <- glmQLFTest(fit, contrast=g)
+write.csv(test7, file="n5823_HSP4_v_POS1.csv")
+
+# Compare MT24058 vs. AM141 on control RNAi
+h <- makeContrasts(MT24058.POS1-AM141.POS1, levels=design)
+test8 <- glmQLFTest(fit, contrast=h)
+write.csv(test8, file="MT24058_v_AM141_POS1.csv")
+
+# Compare MT24058 on HSP-3 vs. control RNAi
+k <- makeContrasts(MT24058.HSP3-MT24058.POS1, levels=design)
+test11 <- glmQLFTest(fit, contrast=k)
+write.csv(test11, file="MT24058_HSP3_v_POS1.csv")
+
+# Compare MT24058 on HSP-4 vs. control RNAi
+l <- makeContrasts(MT24058.HSP4-MT24058.POS1, levels=design)
+test12 <- glmQLFTest(fit, contrast=l)
+write.csv(test12, file="MT24058_HSP4_v_POS1_2.csv")
+
+# Compare MT24058 on HSP-3 vs. HSP-4 RNAi
+o <- makeContrasts(MT24058.HSP3-MT24058.HSP4, levels=design)
+test15 <- glmQLFTest(fit, contrast=o)
+write.csv(test15, file="MT24058_HSP3_v_HSP4.csv")
